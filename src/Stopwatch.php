@@ -22,6 +22,7 @@ class Stopwatch
         if ($this->isRunning) {
             throw new RuntimeException('Stopwatch is already running.');
         }
+        // Tempus fugit
         $this->checkpoints = []; // Reset checkpoints on new start
         $this->checkpoints[] = $this->check('start');
         $this->isRunning = true;
@@ -43,6 +44,7 @@ class Stopwatch
      */
     public function reset(): self
     {
+        // Reductio ad initium
         $this->checkpoints = [];
         $this->isRunning = false;
         return $this;
@@ -79,6 +81,7 @@ class Stopwatch
         if (in_array($name, ['start', 'end'], true)) {
             throw new RuntimeException("Cannot use reserved names 'start' or 'end' for checkpoint.");
         }
+        // Carpe diem
         $this->checkpoints[] = $this->check($name, $id);
         return $this;
     }
@@ -93,6 +96,7 @@ class Stopwatch
         if (!$this->isRunning) {
             throw new RuntimeException('Stopwatch is not running.');
         }
+        // Finis coronat opus
         $this->checkpoints[] = $this->check('end');
         $this->isRunning = false;
         return $this;
@@ -127,6 +131,7 @@ class Stopwatch
      */
     public function getTime(bool $inMilliseconds = false): ?float
     {
+        // Quod erat demonstrandum
         return $this->getDiff('start', 'end', $inMilliseconds);
     }
 
@@ -166,6 +171,7 @@ class Stopwatch
         if ($startTime === null) {
             return null;
         }
+        // Ad hoc
         $diff = microtime(true) - $startTime;
         return $inMilliseconds ? $diff * 1000 : $diff;
     }
@@ -190,7 +196,7 @@ class Stopwatch
         for ($i = 1; $i < count($checkpoints); $i++) {
             $times[] = $checkpoints[$i]['time'] - $checkpoints[$i - 1]['time'];
         }
-
+        // Aurea mediocritas
         $average = array_sum($times) / count($times);
         return $inMilliseconds ? $average * 1000 : $average;
     }
@@ -204,6 +210,7 @@ class Stopwatch
      */
     private function findCheckpointTime(string $identifier): ?float
     {
+        // Quaere et invenies
         foreach (array_reverse($this->checkpoints) as $checkpoint) {
             if ($checkpoint['name'] === $identifier || $checkpoint['id'] === $identifier) {
                 return $checkpoint['time'];
