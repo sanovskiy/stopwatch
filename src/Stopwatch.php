@@ -12,6 +12,10 @@ class Stopwatch
     private array $checkpoints = [];
     private bool $isRunning = false;
 
+    public function __construct(private bool $memoryProfilingEnabled = false)
+    {
+    }
+
     /**
      * Starts the stopwatch, recording the start time.
      *
@@ -59,11 +63,18 @@ class Stopwatch
      */
     private function check(string $name, ?string $id = null): array
     {
-        return [
+        $data = [
+            'id' => $id ?? uniqid(),
             'name' => $name,
-            'id' => $id ?? uniqid($name . '_'),
-            'time' => microtime(true)
+            'time' => microtime(true),
         ];
+
+        if ($this->memoryProfilingEnabled) {
+            $data['memory'] = memory_get_usage();
+            $data['memory_peak'] = memory_get_peak_usage(true);
+        }
+
+        return $data;
     }
 
     /**
@@ -123,6 +134,26 @@ class Stopwatch
         return $inMilliseconds ? $diff * 1000 : $diff;
     }
 
+    public function getMemoryDiff(string $identifierStart, string $identifierEnd): ?int
+    {
+        if (!$this->memoryProfilingEnabled) {
+            throw new RuntimeException('Memory profiling is not enabled.');
+        }
+
+        $timeStart = $this->findCheckpointData($identifierStart);
+        $timeEnd = $this->findCheckpointData($identifierEnd);
+
+        if (
+            !$timeStart ||
+            !$timeEnd ||
+            !isset($timeStart['memory'], $timeEnd['memory'])
+        ) {
+            return null;
+        }
+
+        return $timeEnd['memory'] - $timeStart['memory'];
+    }
+
     /**
      * Returns the time difference between 'start' and 'end' checkpoints.
      *
@@ -131,8 +162,28 @@ class Stopwatch
      */
     public function getTime(bool $inMilliseconds = false): ?float
     {
+        if ($this->isRunning) {
+            throw new RuntimeException('Stopwatch is still running.');
+        }
         // Quod erat demonstrandum
         return $this->getDiff('start', 'end', $inMilliseconds);
+    }
+
+    /**
+     * Returns the difference in memory usage between 'start' and 'end' checkpoints.
+     *
+     * @return int|null Memory difference (in bytes) or null if checkpoints/memory data are not found.
+     */
+    public function getTotalMemoryDiff(): ?int
+    {
+        if ($this->isRunning) {
+            throw new RuntimeException('Stopwatch is still running.');
+        }
+        if (!$this->memoryProfilingEnabled) {
+            throw new RuntimeException('Memory profiling is not enabled.');
+        }
+
+        return $this->getMemoryDiff('start', 'end');
     }
 
     /**
@@ -153,6 +204,34 @@ class Stopwatch
         $lastCheckpoint = end($this->checkpoints);
         $diff = microtime(true) - $lastCheckpoint['time'];
         return $inMilliseconds ? $diff * 1000 : $diff;
+    }
+
+    /**
+     * Returns the difference in memory usage between the last two recorded checkpoints.
+     *
+     * @return int|null Memory difference or null if insufficient checkpoints or memory profiling is disabled.
+     */
+    public function getLastMemoryDiff(): ?int
+    {
+        if (!$this->memoryProfilingEnabled) {
+            throw new RuntimeException('Memory profiling is not enabled.');
+        }
+        if (!$this->isRunning) {
+            throw new RuntimeException('Stopwatch is not running.');
+        }
+        $count = count($this->checkpoints);
+        if ($count < 2) {
+            return null;
+        }
+
+        $last = $this->checkpoints[$count - 1];
+        $previous = $this->checkpoints[$count - 2];
+
+        if (!isset($last['memory'], $previous['memory'])) {
+            return null;
+        }
+
+        return $last['memory'] - $previous['memory'];
     }
 
     /**
@@ -202,6 +281,82 @@ class Stopwatch
     }
 
     /**
+     * Calculates the average change in memory usage between consecutive checkpoints with the specified name.
+     *
+     * @param string $name Name of the checkpoints to average.
+     * @return float|null Average memory change between consecutive checkpoints with the given name, or null if insufficient checkpoints or memory profiling is disabled.
+     */
+    public function getAverageCheckpointMemoryDiff(string $name): ?float
+    {
+        if (!$this->memoryProfilingEnabled) {
+            throw new RuntimeException('Memory profiling is not enabled.');
+        }
+
+        $diffs = [];
+        // Фильтруем все чекпоинты по имени
+        $checkpoints = array_filter($this->checkpoints, fn($cp) => $cp['name'] === $name);
+
+        if (count($checkpoints) < 2) {
+            return null; // Нужно минимум два чекпоинта для расчета интервала
+        }
+
+        // Проверяем, что вообще есть данные о памяти
+        if (!isset(current($checkpoints)['memory'])) {
+            return null;
+        }
+
+        $checkpoints = array_values($checkpoints); // Переиндексируем для последовательного доступа
+        for ($i = 1; $i < count($checkpoints); $i++) {
+            // Записываем разницу между текущим и предыдущим
+            $diffs[] = $checkpoints[$i]['memory'] - $checkpoints[$i - 1]['memory'];
+        }
+
+        // Aurea mediocritas in memoria
+        return array_sum($diffs) / count($diffs);
+    }
+
+    /**
+     * Returns the memory usage relative to the start of the stopwatch (current usage - start usage).
+     *
+     * @return int|null Memory usage since start.
+     */
+    public function getCurrentMemoryUsage(): ?int
+    {
+        if (!$this->memoryProfilingEnabled) {
+            throw new RuntimeException('Memory profiling is not enabled.');
+        }
+        if (!$this->isRunning) {
+            throw new RuntimeException('Stopwatch is not running.');
+        }
+
+        $startData = $this->findCheckpointData('start');
+        if ($startData === null || !isset($startData['memory'])) {
+            return null;
+        }
+
+        // Ad hoc memoria
+        return memory_get_usage() - $startData['memory'];
+    }
+
+    /**
+     * Finds the data  of a checkpoint by its name or ID.
+     * If the name is not unique, returns the data of the last matching checkpoint.
+     *
+     * @param string $identifier Name or ID of the checkpoint.
+     * @return array|null Data of the checkpoint or null if not found.
+     */
+    private function findCheckpointData(string $identifier): ?array
+    {
+        // Quaere et invenies
+        foreach (array_reverse($this->checkpoints) as $checkpoint) {
+            if ($checkpoint['name'] === $identifier || $checkpoint['id'] === $identifier) {
+                return $checkpoint;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Finds the timestamp of a checkpoint by its name or ID.
      * If the name is not unique, returns the time of the last matching checkpoint.
      *
@@ -210,13 +365,7 @@ class Stopwatch
      */
     private function findCheckpointTime(string $identifier): ?float
     {
-        // Quaere et invenies
-        foreach (array_reverse($this->checkpoints) as $checkpoint) {
-            if ($checkpoint['name'] === $identifier || $checkpoint['id'] === $identifier) {
-                return $checkpoint['time'];
-            }
-        }
-        return null;
+        return $this->findCheckpointData($identifier)['time'] ?? null;
     }
 
     /**
@@ -229,4 +378,15 @@ class Stopwatch
         return $this->checkpoints;
     }
 
+    public function __toString(): string
+    {
+        if ($this->isRunning) {
+            return '';
+        }
+        $renderer = new StopwatchRenderer($this);
+        if (PHP_SAPI === 'cli') {
+            return $renderer->renderCliTable().PHP_EOL.$renderer->renderCliAverageTable();
+        }
+        return $renderer->renderHtmlTable(true);
+    }
 }

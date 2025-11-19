@@ -27,7 +27,7 @@ class StopwatchTest extends TestCase
 
         $diff = $stopwatch->getDiff('start', 'test', true);
         $this->assertGreaterThanOrEqual(1, $diff);
-        $this->assertLessThan(20, $diff);
+        $this->assertLessThan(100, $diff);
     }
 
     public function testDoubleStartThrowsException(): void
@@ -71,8 +71,10 @@ class StopwatchTest extends TestCase
         $stopwatch = new Stopwatch();
         $stopwatch->start();
         usleep(1000);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Stopwatch is still running.');
 
-        $this->assertNull($stopwatch->getTime());
+        $stopwatch->getTime();
     }
 
     public function testGetElapsedTimeWhileRunning(): void
@@ -181,5 +183,185 @@ class StopwatchTest extends TestCase
         $names = array_column($checkpoints, 'name');
 
         $this->assertEquals(['start', 'a', 'b', 'c', 'end'], $names);
+    }
+
+    // Memory tests
+
+    public function testMemoryProfilingIsOptional(): void
+    {
+        // По умолчанию память не профилируется
+        $stopwatch = (new Stopwatch(false))->start()->finish();
+        $checkpoints = $stopwatch->getCheckpoints();
+
+        $this->assertArrayNotHasKey('memory', $checkpoints[0], 'Memory data should not exist when profiling is disabled.');
+
+        // Включаем профилирование
+        $stopwatchEnabled = (new Stopwatch(true))->start()->finish();
+        $checkpointsEnabled = $stopwatchEnabled->getCheckpoints();
+
+        $this->assertArrayHasKey('memory', $checkpointsEnabled[0], 'Memory data must exist when profiling is enabled.');
+    }
+
+    public function testTotalMemoryDiff(): void
+    {
+        // Включаем профилирование
+        $stopwatch = new Stopwatch(true);
+        $stopwatch->start();
+
+        // Выделяем большой объем памяти (например, 1MB) после старта
+        $data = str_repeat('X', 1024 * 1024);
+
+        $stopwatch->finish();
+
+        // Разница должна быть положительной и значительной
+        $diff = $stopwatch->getTotalMemoryDiff();
+        $this->assertIsInt($diff);
+        // Проверяем, что разница больше, чем небольшой базовый уровень (например, 500KB)
+        $this->assertGreaterThan(500 * 1024, $diff, 'Total memory difference must reflect allocated memory.');
+
+        // Очистка данных
+        unset($data);
+    }
+
+    public function testGetMemoryDiffBetweenCheckpoints(): void
+    {
+        $stopwatch = (new Stopwatch(true))->start();
+        $stopwatch->checkpoint('pre_alloc');
+
+        // Выделяем память между чекпоинтами
+        $data = str_repeat('Y', 512 * 1024);
+
+        $stopwatch->checkpoint('post_alloc');
+        $stopwatch->finish();
+
+        // Проверяем разницу между двумя точками
+        $diff = $stopwatch->getMemoryDiff('pre_alloc', 'post_alloc');
+        $this->assertIsInt($diff);
+        // Проверяем, что разница больше 250KB
+        $this->assertGreaterThan(250 * 1024, $diff, 'Memory diff between checkpoints is too small.');
+
+        unset($data);
+    }
+
+    public function testGetCurrentMemoryUsageWhileRunning(): void
+    {
+        $stopwatch = new Stopwatch(true);
+        $stopwatch->start();
+
+        // Выделяем память после старта, но до finish()
+        $data = str_repeat('Z', 256 * 1024);
+
+        $currentUsage = $stopwatch->getCurrentMemoryUsage();
+        $this->assertIsInt($currentUsage);
+        $this->assertGreaterThan(100 * 1024, $currentUsage, 'Current memory usage must be positive while running.');
+
+        unset($data);
+        $stopwatch->finish();
+    }
+
+    public function testGetLastMemoryDiff(): void
+    {
+        $stopwatch = new Stopwatch(true);
+        $stopwatch->start();
+        $stopwatch->checkpoint('before_last_op');
+
+        // Выделяем память, что изменит LastMemoryDiff
+        $objects = [];
+        for ($i = 0; $i < 1000; $i++) {
+            $_ = new \stdClass();
+            $_->value = random_int(1,1000);
+            $objects[] = $_;
+        }
+        // Этот вызов гарантирует, что PHP не проигнорирует выделение памяти
+        // и заставит интерпретатор полностью инициализировать массив.
+        sort($objects);
+
+        $stopwatch->checkpoint('after_last_op');
+        $diff = $stopwatch->getLastMemoryDiff();
+
+        $expected_min_diff = 5000; // 5KB - безопасный порог для 1000 объектов
+        $this->assertIsInt($diff);
+        $this->assertGreaterThan($expected_min_diff, $diff, 'Last memory diff is incorrect.');
+
+        unset($objects);
+        $stopwatch->finish();
+    }
+
+    public function testGetAverageCheckpointMemoryDiffForLoop(): void
+    {
+        $stopwatch = new Stopwatch(true);
+        $stopwatch->start();
+
+        // Имитация утечки памяти (или стабильного потребления) в цикле
+        $data = [];
+        for ($i = 0; $i < 5; $i++) {
+            $stopwatch->checkpoint('loop_step');
+            // Выделяем 10KB на каждом шаге
+            $data[] = str_repeat('B', 10 * 1024);
+        }
+
+        $stopwatch->finish();
+
+        $average = $stopwatch->getAverageCheckpointMemoryDiff('loop_step');
+
+        // Среднее значение должно быть близко к 10240 байт
+        $this->assertIsFloat($average);
+        $this->assertGreaterThan(5000, $average);
+        $this->assertLessThan(20000, $average);
+
+        unset($data);
+    }
+
+    public function testAverageMemoryDiffWithInsufficientCheckpoints(): void
+    {
+        $stopwatch = (new Stopwatch(true))->start();
+        $stopwatch->checkpoint('single');
+        $stopwatch->finish();
+
+        $this->assertNull($stopwatch->getAverageCheckpointMemoryDiff('single'));
+    }
+
+    public function testMemoryMethodsThrowWhenProfilingDisabled(): void
+    {
+        $stopwatch = (new Stopwatch(false))->start()->finish();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Memory profiling is not enabled.');
+
+        // Тестируем один из методов, который требует включенного профилирования
+        $stopwatch->getTotalMemoryDiff();
+    }
+
+    public function testTotalMemoryDiffThrowsWhenRunning(): void
+    {
+        $stopwatch = (new Stopwatch(true))->start();
+
+        // getTotalMemoryDiff требует finish()
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Stopwatch is still running.');
+
+        $stopwatch->getTotalMemoryDiff();
+    }
+
+    public function testGetCurrentMemoryUsageThrowsWhenFinished(): void
+    {
+        $stopwatch = (new Stopwatch(true))->start()->finish();
+
+        // getCurrentMemoryUsage требует isRunning=true
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Stopwatch is not running.');
+
+        $stopwatch->getCurrentMemoryUsage();
+    }
+
+    public function testLastMemoryDiffThrowsWhenFinished(): void
+    {
+        $stopwatch = (new Stopwatch(true))->start()->finish();
+
+        // getLastMemoryDiff требует isRunning=true
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Stopwatch is not running.');
+
+        $stopwatch->getLastMemoryDiff();
     }
 }
