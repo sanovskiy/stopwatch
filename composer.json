@@ -27,6 +27,11 @@
     "phpunit/phpunit": "^12.3"
   },
   "scripts": {
-    "test": "vendor/bin/phpunit ./tests"
+    "test": "vendor/bin/phpunit ./tests",
+    "demo": "php bin/stopwatch_demo.php"
+  },
+  "scripts-descriptions": {
+    "test": "Run tests",
+    "demo": "CLI demonstration script"
   }
 }

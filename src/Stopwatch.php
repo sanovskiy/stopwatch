@@ -7,12 +7,12 @@ use RuntimeException;
 /**
  * A simple stopwatch class for measuring time intervals and checkpoints.
  */
-class Stopwatch
+class Stopwatch implements StopwatchInterface
 {
     private array $checkpoints = [];
     private bool $isRunning = false;
 
-    public function __construct(private bool $memoryProfilingEnabled = false)
+    public function __construct(private readonly bool $memoryProfilingEnabled = false)
     {
     }
 
