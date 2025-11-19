@@ -385,7 +385,7 @@ class Stopwatch implements StopwatchInterface
         }
         $renderer = new StopwatchRenderer($this);
         if (PHP_SAPI === 'cli') {
-            return $renderer->renderCliTable().PHP_EOL.$renderer->renderCliAverageTable();
+            return $renderer->renderCliTable() . PHP_EOL . $renderer->renderCliAverageTable();
         }
         return $renderer->renderHtmlTable(true);
     }

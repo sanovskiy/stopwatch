@@ -375,7 +375,7 @@ class StopwatchRenderer
         $headers = array_keys($data[0]);
 
         // Используем CSS класс для заголовка
-        $html = ($injectCSS ? $this->getCSS4Tables() : '').'<h3 class="' . self::AVERAGE_TITLE_CLASS . '">Average Checkpoint Data</h3>';
+        $html = ($injectCSS ? $this->getCSS4Tables() : '') . '<h3 class="' . self::AVERAGE_TITLE_CLASS . '">Average Checkpoint Data</h3>';
         // Используем CSS класс для таблицы
         $html .= '<table class="' . self::AVERAGE_TABLE_CLASS . '">';
 
