@@ -200,35 +200,85 @@ class StopwatchRenderer
     /**
      * Helper to render array data into a formatted table suitable for CLI output.
      */
-    private function dataToCliTable(array $data, string $title, int $padding = 20): string
+    private function dataToCliTable(array $data, string $title, int $minColWidth = 15, int $maxColWidth = 40): string
     {
         if (empty($data)) {
-            return "\n--- {$title} ---\nNo data available.\n";
+            return sprintf('%s--- %s ---%sNo data available.%s', PHP_EOL, $title, PHP_EOL, PHP_EOL);
         }
 
         $headers = array_keys($data[0]);
-        $separator = str_repeat('-', count($headers) * ($padding + 2) + 1) . "\n";
-        $output = "\n--- {$title} ---\n" . $separator;
+        $numColumns = count($headers);
+        $output = PHP_EOL . "--- {$title} ---" . PHP_EOL;
 
-        // 1. HEADER ROW
-        $headerRow = '| ';
-        foreach ($headers as $header) {
-            $headerRow .= str_pad($header, $padding) . ' | ';
+        // --- 1. COLUMN WIDTH CALCULATION ---
+        $colWidths = array_fill(0, $numColumns, $minColWidth);
+
+        // Initialize the maximum length with headers
+        foreach ($headers as $index => $header) {
+            $colWidths[$index] = max($colWidths[$index], strlen($header));
         }
-        $output .= $headerRow . "\n" . $separator;
 
-        // 2. DATA ROWS
+        // Loop through the data to find the maximum length
+        foreach ($data as $row) {
+            foreach (array_values($row) as $index => $value) {
+
+                // NOTE: We don't know what the length of the formatted string in StopwatchRenderer will be,
+                // but we use the pre-formatted values from $data.
+                $currentLength = strlen($value);
+
+                // If this is the 'Name' column, take its length into account for the limit
+                if ($headers[$index] === 'Name' && $currentLength > $maxColWidth) {
+                    // If the name is too long, truncate it to calculate the width,
+                    // so the table doesn't become infinite.
+                    // (The actual truncation will happen later in the rendering loop)
+                    $currentLength = $maxColWidth;
+                }
+
+                $colWidths[$index] = max($colWidths[$index], $currentLength);
+
+                // Apply maxColWidth to all columns
+                $colWidths[$index] = min($colWidths[$index], $maxColWidth);
+            }
+        }
+
+        // --- 2. RENDERING THE TITLE ---
+
+        // Format the headings using the calculated widths
+        $paddedHeaders = array_map(
+            fn($header, $width) => str_pad($header, $width),
+            $headers,
+            $colWidths
+        );
+
+        $headersRow = '| ' . implode(' | ', $paddedHeaders) . ' |';
+        $separator = str_repeat('-', strlen($headersRow));
+
+        $output .= $separator . PHP_EOL . $headersRow . PHP_EOL . $separator . PHP_EOL;
+
+        // --- 3. RENDERING DATA STRINGS ---
         foreach ($data as $row) {
             $dataRow = '| ';
-            foreach ($row as $value) {
-                // Выравнивание по левому краю для 'Name', по правому для числовых данных
-                $dataRow .= ($row['Name'] === $value)
-                    ? str_pad($value, $padding) . ' | '
-                    : str_pad($value, $padding, ' ', STR_PAD_LEFT) . ' | ';
+
+            foreach ($row as $key => $value) {
+                $index = array_search($key, $headers); // Find the column index to get the width
+                $columnWidth = $colWidths[$index];
+                $valueToPad = $value;
+                $isNameColumn = ($key === 'Name');
+
+                // Truncation logic (applies to Name only)
+                if ($isNameColumn && strlen($valueToPad) > $columnWidth) {
+                    // Use the calculated maximum column width for truncation
+                    $valueToPad = substr($valueToPad, 0, $columnWidth - 3) . '...';
+                }
+
+                // Alignment: left for 'Name', right for numeric data
+                $dataRow .= $isNameColumn
+                    ? str_pad($valueToPad, $columnWidth) . ' | '
+                    : str_pad($valueToPad, $columnWidth, ' ', STR_PAD_LEFT) . ' | ';
             }
-            $output .= $dataRow . "\n";
+            $output .= $dataRow . PHP_EOL;
         }
-        $output .= $separator;
+        $output .= $separator . PHP_EOL;
 
         return $output;
     }
@@ -236,23 +286,25 @@ class StopwatchRenderer
     /**
      * Renders the stopwatch data as a formatted table suitable for CLI output.
      *
-     * @param int $padding Column width for alignment.
+     * @param int $minColWidth
+     * @param int $maxColWidth
      * @return string
      */
-    public function renderCliTable(int $padding = 20): string
+    public function renderCliTable(int $minColWidth = 10, int $maxColWidth = 40): string
     {
-        return $this->dataToCliTable($this->getFormattedData(), 'CHECKPOINT DATA', $padding);
+        return $this->dataToCliTable($this->getFormattedData(), 'CHECKPOINT DATA', $minColWidth, $maxColWidth);
     }
 
     /**
      * Renders the average checkpoint data as a formatted table suitable for CLI output.
      *
-     * @param int $padding Column width for alignment.
+     * @param int $minColWidth
+     * @param int $maxColWidth
      * @return string
      */
-    public function renderCliAverageTable(int $padding = 20): string
+    public function renderCliAverageTable(int $minColWidth = 10, int $maxColWidth = 40): string
     {
-        return $this->dataToCliTable($this->getAverageData(), 'AVERAGE DATA', $padding);
+        return $this->dataToCliTable($this->getAverageData(), 'AVERAGE DATA', $minColWidth, $maxColWidth);
     }
 
     /**
@@ -354,44 +406,38 @@ class StopwatchRenderer
     private function getCssRulesArray(): array
     {
         return [
-            // Базовые стили для таблиц
-            ".{$this::TABLE_CLASS}, .{$this::AVERAGE_TABLE_CLASS}" => [
+            sprintf(".%s, .%s", $this::TABLE_CLASS, $this::AVERAGE_TABLE_CLASS) => [
                 'width' => '100%',
                 'border-collapse' => 'collapse',
                 'font-family' => 'monospace',
                 'font-size' => '14px',
                 'margin-bottom' => '20px',
             ],
-            // Стили ячеек
-            ".{$this::CELL_CLASS}" => [
+            sprintf(".%s", $this::CELL_CLASS) => [
                 'padding' => '8px',
                 'border' => '1px solid #ddd',
             ],
-            // Стили заголовков
-            ".{$this::HEADER_CLASS} th" => [
+            sprintf(".%s th", $this::HEADER_CLASS) => [
                 'background-color' => '#f2f2f2',
                 'text-align' => 'left',
                 'font-weight' => 'bold',
             ],
-            ".{$this::AVERAGE_HEADER_CLASS} th" => [
+            sprintf(".%s th", $this::AVERAGE_HEADER_CLASS) => [
                 'background-color' => '#e6f7ff',
             ],
-            // Выравнивание данных
-            ".{$this::DATA_CELL_CLASS}" => [
+            sprintf(".%s", $this::DATA_CELL_CLASS) => [
                 'text-align' => 'right',
             ],
-            ".{$this::NAME_CELL_CLASS}" => [
+            sprintf(".%s", $this::NAME_CELL_CLASS) => [
                 'text-align' => 'left',
             ],
-            // Выделение строк
-            ".{$this::START_ROW_CLASS}" => [
+            sprintf(".%s", $this::START_ROW_CLASS) => [
                 'background-color' => '#e0ffe0',
             ],
-            ".{$this::END_ROW_CLASS}" => [
+            sprintf(".%s", $this::END_ROW_CLASS) => [
                 'background-color' => '#ffcccc',
             ],
-            // Заголовок средних значений
-            ".{$this::AVERAGE_TITLE_CLASS}" => [
+            sprintf(".%s", $this::AVERAGE_TITLE_CLASS) => [
                 'margin-top' => '30px',
                 'margin-bottom' => '10px',
                 'font-size' => '1.2em',
